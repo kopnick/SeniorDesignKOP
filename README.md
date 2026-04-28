@@ -66,6 +66,11 @@ Leave the PowerShell window open while the dashboard is in use. `server.py` runs
 `sdtest.py` immediately, then again every 30 seconds. The browser also reloads
 the latest `gui_YYYY-MM-DD.xlsx` workbook every 30 seconds.
 
+Important: Use the `http://localhost:8000/popsicle_dashboard.html` address for
+normal operation. Do not open `popsicle_dashboard.html` directly from the file
+browser with a `file:///` address. The local server is what lets the browser load
+the latest generated workbook consistently.
+
 ## Generated Local Files
 
 - `data_YYYY-MM-DD.xlsx`: Raw local cache of the day's PostgreSQL rows. This lets
@@ -99,6 +104,13 @@ normal use.
 
 - Dashboard page will not open: Make sure `python server.py` is still running and
   open `http://localhost:8000/popsicle_dashboard.html`.
+- Correct dashboard does not appear: Stop the server with `Ctrl+C`, restart
+  `python server.py` from inside the `Dashboard` folder, then hard-refresh the
+  browser with `Ctrl+F5`. This clears any old dashboard template cached by the
+  browser.
+- Dashboard opened from the file browser does not update: Close that tab and use
+  `http://localhost:8000/popsicle_dashboard.html` instead of the `file:///`
+  version.
 - Dashboard says the workbook is missing: Run `python server.py` from inside the
   `Dashboard` folder and confirm `gui_YYYY-MM-DD.xlsx` is being created.
 - No new data appears: Confirm Railway is deployed, iMonnit is sending webhook
