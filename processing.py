@@ -1,13 +1,22 @@
+"""Railway webhook app for the King of Pops iMonnit data pipeline.
+
+This Flask app receives iMonnit webhook payloads, accepts only the configured
+production sensors during the configured production window, and stores each event
+in Railway PostgreSQL. The database is kept as a partitioned `events` table with
+one daily partition per retained production day. Duplicate messages are ignored
+using message GUID and device/sensor/timestamp uniqueness. The `/latest` endpoint
+is a small inspection endpoint that returns the newest stored events.
+"""
+
 from flask import Flask, request, jsonify
 import os
-from datetime import datetime, timedelta, time
 from datetime import datetime, timezone, timedelta
+from datetime import time
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-app = Flask(__name__)
-
-
+# Sensors and production schedule that control what gets stored in PostgreSQL.
+# To add or remove sensors later, update this list and review classify_sensor().
 DRY_CONTACT_NAMES = (
     "Dry Contact - Wrap",
     "Dry Contact - Air Cooled",
@@ -27,13 +36,13 @@ REQUIRED_DRY_CONTACT_FIELDS = (
     "dataValue",
 )
 
-RETAINED_PRODUCTION_DAYS = 8
+RETAINED_PRODUCTION_DAYS = 8  # Current PostgreSQL retention window.
 PARTITION_PREFIX = "events_p_"
-PRODUCTION_START_TIME = time(6, 0, 0) # 6 am start time
-PRODUCTION_END_TIME = time(22, 0, 0) # 10pm end time
-PRODUCTION_WEEKDAYS = {0, 1, 2, 3, 6}  # Monday-Thursday 4 - Friday, 5 - Saturday, 6 - Sunday
+PRODUCTION_START_TIME = time(6, 0, 0)  # 6:00 AM local production start.
+PRODUCTION_END_TIME = time(22, 0, 0)  # 10:00 PM local production end.
+PRODUCTION_WEEKDAYS = {0, 1, 2, 3, 6}  # Monday-Thursday and Sunday.
 
-#convert to EST 
+app = Flask(__name__)
 
 def to_est(utc_str):
     """Convert UTC timestamp string from Monnit to EST/EDT."""
@@ -45,9 +54,7 @@ def to_est(utc_str):
     except:
         return utc_str  # return original if conversion fails
         
-# ---------------------------------------------------------
-# POSTGRES CONNECTION (Railway Environment Variables)
-# ---------------------------------------------------------
+# PostgreSQL connection. Railway supplies these environment variables to the app.
 def get_db_connection():
     return psycopg2.connect(
         host=os.environ.get("PGHOST"),
@@ -76,10 +83,11 @@ def parse_dry_contact_state(raw_state):
         dummy = float(raw_state)
         return raw_state
     except:
-        return none
+        return None
 
 
 def classify_sensor(sensor):
+    """Return whether one incoming sensor message should be stored."""
     sensor_name = sensor.get("sensorName", "")
     data_type = sensor.get("dataType")
 
@@ -133,6 +141,7 @@ def is_production_date(date_value):
 
 
 def recent_production_dates(reference_date, count=RETAINED_PRODUCTION_DAYS):
+    """Return the newest production dates that should have PostgreSQL partitions."""
     dates = []
     current = reference_date
 
@@ -178,6 +187,7 @@ def list_event_partitions(cur):
 
 
 def ensure_events_parent_table(cur):
+    """Create or migrate the parent events table to the partitioned layout."""
     info = get_events_table_info(cur)
     print(f"EVENTS_TABLE_BEFORE: {info}", flush=True)
 
@@ -235,6 +245,7 @@ def ensure_events_parent_table(cur):
 
 
 def migrate_legacy_events(cur):
+    """Move rows from an older non-partitioned events table into partitions."""
     cur.execute(
         """
         SELECT EXISTS (
@@ -280,6 +291,7 @@ def migrate_legacy_events(cur):
 
 
 def ensure_partition_for_date(cur, event_date):
+    """Create the daily events partition and indexes for a production date."""
     partition_name = partition_table_name(event_date)
     start_date = event_date
     end_date = event_date + timedelta(days=1)
@@ -309,6 +321,7 @@ def ensure_partition_for_date(cur, event_date):
 
 
 def drop_expired_partitions(cur, keep_dates):
+    """Drop daily partitions outside the current retention window."""
     keep_date_set = set(keep_dates)
 
     cur.execute(
@@ -337,8 +350,8 @@ def drop_expired_partitions(cur, keep_dates):
             cur.execute(f"DROP TABLE IF EXISTS {partition_name};")
 
 
-# Create table if not exists
 def init_db():
+    """Verify the database schema and retained partitions when the app starts."""
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -366,9 +379,7 @@ def init_db():
 init_db()
 
 
-# ---------------------------------------------------------
-# WEBHOOK ENDPOINT (iMonnit -> Railway)
-# ---------------------------------------------------------
+# iMonnit -> Railway endpoint. Each request may contain many sensor messages.
 @app.route("/imonnit-webhook", methods=["POST"])
 def webhook():
     print("WEBHOOK FUNCTION CALLED", flush=True)
@@ -535,10 +546,7 @@ def webhook():
     )
 
 
-# ---------------------------------------------------------
-# DASHBOARD ENDPOINT (Dashboard -> Railway)
-# Returns the most recent 50 events
-# ---------------------------------------------------------
+# Lightweight inspection endpoint for checking the newest stored events.
 @app.route("/latest", methods=["GET"])
 def latest():
     conn = get_db_connection()

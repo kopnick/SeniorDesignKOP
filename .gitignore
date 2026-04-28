@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+
+# Dashboard runtime outputs are generated locally by Dashboard/sdtest.py.
+data_*.xlsx
+gui_*.xlsx
+Dashboard/data_*.xlsx
+Dashboard/gui_*.xlsx
+Dashboard/data.csv
