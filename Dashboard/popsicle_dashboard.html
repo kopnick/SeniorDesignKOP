@@ -986,6 +986,11 @@ function moldLabel(index) {
   return `Mold ${String(index + 1).padStart(2, '0')}`;
 }
 
+function moldRangeLabel(count) {
+  const end = String(count).padStart(2, '0');
+  return count === 1 ? 'Mold 01' : `Molds 01-${end}`;
+}
+
 function renderReadyPanel(prefix, ages) {
   const status = document.getElementById(`${prefix}-ready-status`);
   const detail = document.getElementById(`${prefix}-ready-detail`);
@@ -999,15 +1004,11 @@ function renderReadyPanel(prefix, ages) {
   }
 
   const readyCount = ages.filter(age => age >= READY_SEC).length;
-  const readyMolds = ages
-    .map((age, index) => ({ age, index }))
-    .filter(item => item.age >= READY_SEC)
-    .map(item => moldLabel(item.index));
   const nextPending = ages.find(age => age < READY_SEC);
   if (readyCount > 0) {
     status.textContent = 'READY TO PULL';
     status.className = 'ready-status ready';
-    const readyText = `Ready: ${readyMolds.join(', ')}`;
+    const readyText = `Ready: ${moldRangeLabel(readyCount)}`;
     detail.textContent = readyText;
   } else {
     const oldest = Math.max(...ages);
