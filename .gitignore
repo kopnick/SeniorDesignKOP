@@ -6,4 +6,8 @@ data_*.xlsx
 gui_*.xlsx
 Dashboard/data_*.xlsx
 Dashboard/gui_*.xlsx
+Dashboard/gui_*.json
+Dashboard/cache_*.csv
 Dashboard/data.csv
+Dashboard/server_live*.log
+Dashboard/*.tmp

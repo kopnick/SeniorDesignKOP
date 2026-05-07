@@ -1,3 +1,17 @@
+"""Build the local King of Pops dashboard data files.
+
+This script is the bridge between the Railway PostgreSQL event history and the
+browser dashboard. Each run reads any new database rows, merges them with the
+local daily history, computes dashboard metrics, and writes:
+
+- data_YYYY-MM-DD.xlsx: raw local event history for the day
+- gui_YYYY-MM-DD.xlsx: Excel compatibility export of dashboard metrics
+- gui_YYYY-MM-DD.json: lightweight live file read by the browser every 5 seconds
+- cache_YYYY-MM-DD.csv: fallback raw history only when the Excel file is locked
+
+Run directly with `python sdtest.py`; server.py runs it automatically.
+"""
+
 import glob
 import json
 import os
@@ -11,7 +25,12 @@ from sqlalchemy import create_engine
 pd.options.mode.chained_assignment = None
 
 
-DB_URL = "postgresql://postgres:QbcDZnDSLdphWUiKWtMnpTuoZgYvGUpm@monorail.proxy.rlwy.net:10094/railway"
+# Local dashboard database connection. Set this before running server.py:
+#   PowerShell: $env:KOP_DATABASE_URL="postgresql://..."
+# DATABASE_URL is also accepted for deploy/hosting compatibility.
+DB_URL = os.environ.get("KOP_DATABASE_URL") or os.environ.get("DATABASE_URL")
+
+# Raw PostgreSQL/event columns expected by the dashboard processor.
 EXPECTED_COLUMNS = [
     "id",
     "device_id",
@@ -32,6 +51,10 @@ SENSORS = {
 }
 
 
+# File and table naming
+# ---------------------
+# The database stores daily partitions named like events_p_20260506. The local
+# dashboard files use the readable YYYY-MM-DD date in their filenames.
 def today_names():
     now = datetime.now()
     current_date = now.strftime("%Y-%m-%d")
@@ -45,6 +68,10 @@ def today_names():
     )
 
 
+# Local history readers
+# ---------------------
+# The raw Excel file is the normal source of local history. The CSV cache exists
+# only to recover rows when Excel/OneDrive has the workbook locked.
 def empty_events():
     return pd.DataFrame(columns=EXPECTED_COLUMNS)
 
@@ -162,6 +189,10 @@ def write_json_atomic(payload, path):
     return False
 
 
+# Event normalization
+# -------------------
+# All inputs are reshaped into the same schema, deduplicated by event id, and
+# sorted so later calculations can work from clean chronological history.
 def normalize_events(df):
     if df is None or df.empty:
         return empty_events()
@@ -180,11 +211,19 @@ def normalize_events(df):
 
 
 def fetch_new_events(db_name, last_id):
+    if not DB_URL:
+        raise RuntimeError(
+            "KOP_DATABASE_URL or DATABASE_URL must be set to the Railway PostgreSQL connection string."
+        )
     engine = create_engine(DB_URL, pool_pre_ping=True)
     query = f"SELECT * FROM {db_name} WHERE id > %(last_id)s;"
     return normalize_events(pd.read_sql(query, engine, params={"last_id": int(last_id)}))
 
 
+# Production event helpers
+# ------------------------
+# Dry-contact Closed -> Open transitions are counted as production actions:
+# pulls for the two freezing machines and wraps for the wrapping station.
 def sensor_df(df, sensor_name):
     if df.empty:
         return empty_events()
@@ -242,6 +281,11 @@ def seconds_since_first_of_last(events, count=10):
     return abs((pd.Timestamp.now() - first_timestamp).total_seconds()) / len(recent)
 
 
+# Dashboard metric calculations
+# -----------------------------
+# Pull intervals are seconds between consecutive pull events. Mold ages simulate
+# freezer slots: each pull resets the oldest ready slot, so the ready list drops
+# after a mold is pulled and grows again as molds reach 30 minutes.
 def pull_intervals_sec(events, count=10):
     if events.empty:
         return []
@@ -288,6 +332,10 @@ def interval_average_sec(events, count=10):
     return float(sum(values) / len(values))
 
 
+# Output builders
+# ---------------
+# build_outputs keeps the legacy Excel export contract. build_live_payload is the
+# richer JSON contract used by popsicle_dashboard.html for the 5-second live UI.
 def latest_state(df):
     if df.empty:
         return []
@@ -382,6 +430,10 @@ def build_live_payload(df, db_status):
     }
 
 
+# Main refresh
+# ------------
+# Every run reads local history, pulls only newer database rows, writes the live
+# JSON atomically, and updates Excel outputs best-effort.
 def refresh_data():
     db_name, data_file, gui_file, json_file, cache_file = today_names()
     local_data = read_latest_local_events(data_file, cache_file)

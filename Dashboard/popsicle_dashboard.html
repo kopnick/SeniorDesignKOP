@@ -1285,7 +1285,7 @@ updateTime();
 // ── Auto-refresh interval (ms) ──
 const REFRESH_MS = 5_000;
 
-// Filename must match what sdtest.py writes: gui_YYYY-MM-DD.xlsx
+// Filename stem must match what sdtest.py writes: gui_YYYY-MM-DD.json/.xlsx
 function todayStem() {
   const d = new Date();
   const y = d.getFullYear();
